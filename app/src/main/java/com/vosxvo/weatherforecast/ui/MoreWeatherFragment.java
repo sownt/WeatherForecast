@@ -109,7 +109,7 @@ public class MoreWeatherFragment extends Fragment implements WeatherFragment, Sw
         deg.setText(String.format("%.1f", bundle.getDouble("deg")));
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("K:mm a");
-        dateFormat.setTimeZone(TimeZone.getTimeZone("GMT+7"));
+        dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
         Date rise = new Date((long) bundle.getLong("sunrise") * 1000);
         sunrise.setText(dateFormat.format(rise));
         Date set = new Date((long) bundle.getLong("sunset") * 1000);

@@ -1,6 +1,7 @@
 package com.vosxvo.weatherforecast;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.location.LocationListener;
@@ -60,7 +61,7 @@ public class MainActivity extends FragmentActivity {
 
     public static final String MAIN_WEATHER_REQUEST_KEY = "MAIN_WEATHER";
     public static final String MORE_WEATHER_REQUEST_KEY = "MORE_WEATHER";
-    public static final String WEATHER_REQUEST_KEY = "WEATHER_REQUEST_KEY";
+
     @Inject
     public OpenWeatherService service;
 
@@ -76,39 +77,6 @@ public class MainActivity extends FragmentActivity {
         TabLayout tabLayout = findViewById(R.id.tabDots);
         new TabLayoutMediator(tabLayout, pager, (tab, position) -> {
         }).attach();
-
-        // Check and request Location Setting
-        createLocationRequest();
-        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
-                .addLocationRequest(locationRequest);
-        SettingsClient client = LocationServices.getSettingsClient(this);
-        Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
-
-        task.addOnFailureListener(this, e -> {
-            if (e instanceof ResolvableApiException) {
-                ResolvableApiException resolvableApiException = (ResolvableApiException) e;
-                try {
-                    resolvableApiException.startResolutionForResult(MainActivity.this, REQUEST_CHECK_SETTINGS);
-                } catch (IntentSender.SendIntentException sendIntentException) {
-                    sendIntentException.printStackTrace();
-                }
-            }
-        });
-
-        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-
-        if (savedInstanceState != null) {
-            updateData(MAIN_WEATHER_REQUEST_KEY, savedInstanceState);
-        }
-
-        pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
-            @Override
-            public void onPageSelected(int position) {
-                super.onPageSelected(position);
-                if (position == 0) {
-                }
-            }
-        });
     }
 
     @Override
@@ -165,8 +133,30 @@ public class MainActivity extends FragmentActivity {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
                     ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSION_SETTINGS);
+            } else {
+                checkLocationSettings();
             }
         }
+    }
+
+    public void checkLocationSettings() {
+        // Check and request Location Setting
+        createLocationRequest();
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
+                .addLocationRequest(locationRequest);
+        SettingsClient client = LocationServices.getSettingsClient(this);
+        Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
+
+        task.addOnFailureListener(this, e -> {
+            if (e instanceof ResolvableApiException) {
+                ResolvableApiException resolvableApiException = (ResolvableApiException) e;
+                try {
+                    resolvableApiException.startResolutionForResult(MainActivity.this, REQUEST_CHECK_SETTINGS);
+                } catch (IntentSender.SendIntentException sendIntentException) {
+                    sendIntentException.printStackTrace();
+                }
+            }
+        });
     }
 
     public Bundle makeMainWeatherBundle() {
@@ -195,18 +185,26 @@ public class MainActivity extends FragmentActivity {
         bundle.putInt("humidity", openWeatherRespond.getMain().getHumidity());
         bundle.putDouble("speed", openWeatherRespond.getWind().getSpeed());
         bundle.putDouble("deg", openWeatherRespond.getWind().getDeg());
-        bundle.putLong("sunrise", openWeatherRespond.getSys().getSunrise());
-        bundle.putLong("sunset", openWeatherRespond.getSys().getSunset());
+        bundle.putLong("sunrise", openWeatherRespond.getSys().getSunrise() + openWeatherRespond.getTimezone());
+        bundle.putLong("sunset", openWeatherRespond.getSys().getSunset() + openWeatherRespond.getTimezone());
 
         return bundle;
     }
 
     public void updateLocation() {
         checkPermission();
-        if (locationManager != null) {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, MIN_TIME_INTERVAL,
-                    MIN_DISTANCE_UPDATE, locationListener);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                if (locationManager == null) {
+                    locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+                }
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, MIN_TIME_INTERVAL,
+                        MIN_DISTANCE_UPDATE, locationListener);
+            }
         }
+
     }
 
     public void updateData(String requestKey, Bundle result) {
@@ -219,7 +217,11 @@ public class MainActivity extends FragmentActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         switch (requestCode) {
             case REQUEST_PERMISSION_SETTINGS:
-                checkPermission();
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    checkLocationSettings();
+                } else {
+                    ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
+                }
                 return;
         }
     }
