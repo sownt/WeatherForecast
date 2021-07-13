@@ -56,5 +56,6 @@ dependencies {
     // For local unit tests
     testImplementation 'com.google.dagger:hilt-android-testing:2.37'
     testAnnotationProcessor 'com.google.dagger:hilt-compiler:2.37'
+    implementation 'com.google.android.gms:play-services-location:18.0.0'
 
 }

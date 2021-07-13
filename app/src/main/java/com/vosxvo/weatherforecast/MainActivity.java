@@ -1,6 +1,7 @@
 package com.vosxvo.weatherforecast;
 
 import android.Manifest;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -17,6 +18,14 @@ import androidx.fragment.app.FragmentActivity;
 import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
 
+import com.google.android.gms.common.api.ResolvableApiException;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.LocationSettingsRequest;
+import com.google.android.gms.location.LocationSettingsResponse;
+import com.google.android.gms.location.SettingsClient;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.Task;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.vosxvo.weatherforecast.api.OpenWeatherRespond;
@@ -39,11 +48,14 @@ public class MainActivity extends FragmentActivity {
     private static final int NUM_PAGES = 2;
     private static final long MIN_TIME_INTERVAL = 600000; //    5 min
     private static final float MIN_DISTANCE_UPDATE = 5000; //    5 km
+    private static final int REQUEST_CHECK_SETTINGS = 10000;
+    private static final int REQUEST_PERMISSION_SETTINGS = 10001;
 
     private ViewPager2 pager;
     private FragmentStateAdapter adapter;
     private LocationManager locationManager;
     private OpenWeatherRespond openWeatherRespond;
+    private LocationRequest locationRequest;
     private final LocationListener locationListener = location -> getWeather(location.getLatitude(), location.getLongitude());
 
     public static final String MAIN_WEATHER_REQUEST_KEY = "MAIN_WEATHER";
@@ -64,6 +76,24 @@ public class MainActivity extends FragmentActivity {
         TabLayout tabLayout = findViewById(R.id.tabDots);
         new TabLayoutMediator(tabLayout, pager, (tab, position) -> {
         }).attach();
+
+        // Check and request Location Setting
+        createLocationRequest();
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
+                .addLocationRequest(locationRequest);
+        SettingsClient client = LocationServices.getSettingsClient(this);
+        Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
+
+        task.addOnFailureListener(this, e -> {
+            if (e instanceof ResolvableApiException) {
+                ResolvableApiException resolvableApiException = (ResolvableApiException) e;
+                try {
+                    resolvableApiException.startResolutionForResult(MainActivity.this, REQUEST_CHECK_SETTINGS);
+                } catch (IntentSender.SendIntentException sendIntentException) {
+                    sendIntentException.printStackTrace();
+                }
+            }
+        });
 
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
 
@@ -90,7 +120,6 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        checkPermission();
         if (locationManager != null) locationManager.removeUpdates(locationListener);
     }
 
@@ -103,16 +132,17 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
-    @Override
-    protected void onSaveInstanceState(@NonNull @NotNull Bundle outState) {
-        super.onSaveInstanceState(outState);
-        outState.putString("geoLocation", openWeatherRespond.getName());
-        outState.putString("main", openWeatherRespond.getWeather()[0].getMain());
-        outState.putDouble("temp", openWeatherRespond.getMain().getTemp());
-        outState.putDouble("tempMin", openWeatherRespond.getMain().getTempMin());
-        outState.putDouble("tempMax", openWeatherRespond.getMain().getTempMax());
+    protected void createLocationRequest() {
+        locationRequest = LocationRequest.create();
+        locationRequest.setInterval(MIN_TIME_INTERVAL);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
     }
 
+    /**
+     * Get weather data from OpenWeather via Retrofit
+     * @param lat   latitude
+     * @param lon   longitude
+     */
     public void getWeather(double lat, double lon) {
         Call<OpenWeatherRespond> call = service.getOpenWeatherRespond(lat, lon, "metric", OpenWeather_API_KEY);
         call.enqueue(new Callback<OpenWeatherRespond>() {
@@ -134,7 +164,7 @@ public class MainActivity extends FragmentActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
                     ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, 99);
+                requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSION_SETTINGS);
             }
         }
     }
@@ -188,7 +218,9 @@ public class MainActivity extends FragmentActivity {
                                            @NonNull @NotNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         switch (requestCode) {
-            case 99:
+            case REQUEST_PERMISSION_SETTINGS:
+                checkPermission();
+                return;
         }
     }
 
