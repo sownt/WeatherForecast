@@ -2,6 +2,7 @@ package com.vosxvo.weatherforecast.ui;
 
 import android.content.Context;
 import android.os.Bundle;
+import android.os.Handler;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -69,6 +70,12 @@ public class MainWeatherFragment extends Fragment implements WeatherFragment, Sw
 
         mainWeatherLayout.setOnRefreshListener(this);
         startLoading();
+
+        getParentFragmentManager().setFragmentResultListener(MainActivity.MAIN_WEATHER_UPDATE,
+                this, (requestKey, result) -> {
+                    bundle = result;
+                    updateUI(result);
+                });
     }
 
     @Override
@@ -78,27 +85,17 @@ public class MainWeatherFragment extends Fragment implements WeatherFragment, Sw
     }
 
     @Override
-    public void onStart() {
-        super.onStart();
-        getParentFragmentManager().setFragmentResultListener(MainActivity.MAIN_WEATHER_REQUEST_KEY,
-                this, (requestKey, result) -> {
-            bundle = result;
-            updateUI(result);
-        });
-    }
-
-    @Override
     public void onRefresh() {
-        ((MainActivity) getActivity()).updateLocation();
+        getParentFragmentManager().setFragmentResult(MainActivity.UPDATE_UI_REQUEST_KEY, new Bundle());
     }
 
     @Override
     public void updateUI(Bundle bundle) {
-        geoLocation.setText(bundle.getString("geoLocation"));
-        temp.setText(String.format("%.0f°C", bundle.getDouble("temp")));
-        description.setText(bundle.getString("main"));
-        tempMin.setText(String.format("%.0f°C", bundle.getDouble("tempMin")));
-        tempMax.setText(String.format(" / %.0f°C", bundle.getDouble("tempMax")));
+        geoLocation.setText(bundle.getString("name"));
+        temp.setText(String.format("%.0f°C", bundle.getDouble("main.temp")));
+        description.setText(bundle.getString("weather.main"));
+        tempMin.setText(String.format("%.0f°C", bundle.getDouble("main.temp_min")));
+        tempMax.setText(String.format(" / %.0f°C", bundle.getDouble("main.temp_max")));
         mainWeatherLayout.setRefreshing(false);
 
         stopLoading();
@@ -120,7 +117,7 @@ public class MainWeatherFragment extends Fragment implements WeatherFragment, Sw
 
     public void startFade() {
         AlphaAnimation animation = new AlphaAnimation(0.0f, 1.0f);
-        animation.setDuration(1000);
+        animation.setDuration(500);
         animation.setRepeatCount(0);
         animation.setRepeatMode(Animation.REVERSE);
         mainLayout.startAnimation(animation);

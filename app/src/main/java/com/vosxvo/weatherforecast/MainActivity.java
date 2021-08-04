@@ -1,38 +1,51 @@
 package com.vosxvo.weatherforecast;
 
 import android.Manifest;
-import android.app.NotificationManager;
+import android.content.Intent;
 import android.content.IntentSender;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.location.LocationListener;
-import android.location.LocationManager;
+import android.location.Location;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PersistableBundle;
+import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
+import androidx.fragment.app.FragmentResultListener;
 import androidx.viewpager2.adapter.FragmentStateAdapter;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.gms.common.api.ResolvableApiException;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.LocationSettingsRequest;
 import com.google.android.gms.location.LocationSettingsResponse;
 import com.google.android.gms.location.SettingsClient;
+import com.google.android.gms.tasks.CancellationToken;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.OnTokenCanceledListener;
 import com.google.android.gms.tasks.Task;
+import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
-import com.vosxvo.weatherforecast.api.OpenWeatherRespond;
 import com.vosxvo.weatherforecast.api.OpenWeatherService;
+import com.vosxvo.weatherforecast.model.OpenWeatherData;
+import com.vosxvo.weatherforecast.preferences.PreferencesHelper;
 import com.vosxvo.weatherforecast.ui.MainWeatherFragment;
 import com.vosxvo.weatherforecast.ui.MoreWeatherFragment;
+import com.vosxvo.weatherforecast.ui.SavedLocationFragment;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -43,27 +56,53 @@ import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 
+/**
+ * <h1>Launcher Activity</h1>
+ *
+ * @author vosxvo (Thai Son)
+ * @version 1.0
+ */
+
 @AndroidEntryPoint
 public class MainActivity extends FragmentActivity {
     private static final String OpenWeather_API_KEY = BuildConfig.OpenWeatherApiKey;
-    private static final int NUM_PAGES = 2;
-    private static final long MIN_TIME_INTERVAL = 600000; //    5 min
-    private static final float MIN_DISTANCE_UPDATE = 5000; //    5 km
+    private static final int NUM_PAGES = 3;
+    private static final long MIN_TIME_INTERVAL = 10000;
     private static final int REQUEST_CHECK_SETTINGS = 10000;
     private static final int REQUEST_PERMISSION_SETTINGS = 10001;
 
-    private ViewPager2 pager;
-    private FragmentStateAdapter adapter;
-    private LocationManager locationManager;
-    private OpenWeatherRespond openWeatherRespond;
-    private LocationRequest locationRequest;
-    private final LocationListener locationListener = location -> getWeather(location.getLatitude(), location.getLongitude());
+    public static final String MAIN_WEATHER_UPDATE = "MAIN_WEATHER";
+    public static final String MORE_WEATHER_UPDATE = "MORE_WEATHER";
+    public static final String SAVED_LOCATION_UPDATE = "SAVED_LOCATION";
+    public static final String UPDATE_UI_REQUEST_KEY = "UPDATE_UI";
+    public static final String GET_WEATHER_REQUEST_KEY = "GET_WEATHER";
 
-    public static final String MAIN_WEATHER_REQUEST_KEY = "MAIN_WEATHER";
-    public static final String MORE_WEATHER_REQUEST_KEY = "MORE_WEATHER";
+    private ViewPager2 pager;
+    private LocationRequest locationRequest;
+    private FusedLocationProviderClient locationProviderClient;
+    private PreferencesHelper preferencesHelper;
 
     @Inject
     public OpenWeatherService service;
+
+    private Callback<OpenWeatherData> updateCallback = new Callback<OpenWeatherData>() {
+        @Override
+        public void onResponse(@NotNull Call<OpenWeatherData> call,
+                               @NotNull Response<OpenWeatherData> response) {
+            OpenWeatherData result = response.body();
+            if (result == null) return;
+            updateData(MAIN_WEATHER_UPDATE, result.toBundle());
+            updateData(MORE_WEATHER_UPDATE, result.toBundle());
+        }
+
+        @Override
+        public void onFailure(@NotNull Call<OpenWeatherData> call, @NotNull Throwable t) {
+            Log.e("Retrofit", t.getMessage());
+            // Get weather data from Shared Preferences
+            updateData(MAIN_WEATHER_UPDATE, preferencesHelper.getPreferences());
+            updateData(MORE_WEATHER_UPDATE, preferencesHelper.getPreferences());
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,32 +110,132 @@ public class MainActivity extends FragmentActivity {
         setContentView(R.layout.activity_main);
 
         pager = findViewById(R.id.pager);
-        adapter = new ScreenSlidePagerAdapter(this);
+        locationProviderClient = LocationServices.getFusedLocationProviderClient(this);
+
+        FragmentStateAdapter adapter = new ScreenSlidePagerAdapter(this);
         pager.setAdapter(adapter);
+        pager.setCurrentItem(1);
+        pager.setOffscreenPageLimit(2);
 
         TabLayout tabLayout = findViewById(R.id.tabDots);
         new TabLayoutMediator(tabLayout, pager, (tab, position) -> {
         }).attach();
-    }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        updateLocation();
-    }
+        preferencesHelper = new PreferencesHelper(this, MODE_PRIVATE);
+        updateWeather();
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        if (locationManager != null) locationManager.removeUpdates(locationListener);
+        getSupportFragmentManager().setFragmentResultListener(UPDATE_UI_REQUEST_KEY, this,
+                (requestKey, result) -> updateWeather());
+
+        getSupportFragmentManager().setFragmentResultListener(GET_WEATHER_REQUEST_KEY, this,
+                (requestKey, result) -> getWeather(
+                        result.getDouble("lat", 0.0),
+                        result.getDouble("lon", 0.0),
+                        new Callback<OpenWeatherData>() {
+                            @Override
+                            public void onResponse(Call<OpenWeatherData> call, Response<OpenWeatherData> response) {
+                                OpenWeatherData result = response.body();
+                                if (result == null) return;
+                                updateData(MAIN_WEATHER_UPDATE, result.toBundle());
+                                updateData(MORE_WEATHER_UPDATE, result.toBundle());
+                                updateData(SAVED_LOCATION_UPDATE, result.toBundle());
+                            }
+
+                            @Override
+                            public void onFailure(Call<OpenWeatherData> call, Throwable t) {
+
+                            }
+                        }));
     }
 
     @Override
     public void onBackPressed() {
         if (pager.getCurrentItem() == 0) {
+            pager.setCurrentItem(1);
+        } else if (pager.getCurrentItem() == 1) {
             super.onBackPressed();
         } else {
             pager.setCurrentItem(pager.getCurrentItem() - 1);
+        }
+    }
+
+    public void updateWeather() {
+        if (preferencesHelper.usesLocation()) {
+            // if "uses_location" is true or it doesn't init, get coordinate from Fused Location Provider
+            // before, we need request location permission
+            requestLocationPermissions();
+        } else {
+            Bundle bundle = preferencesHelper.getPreferences();
+            getWeather(
+                    bundle.getDouble("coord.lat"),
+                    bundle.getDouble("coord.lon"),
+                    updateCallback
+            );
+        }
+    }
+
+    public void getWeather(Location location, Callback<OpenWeatherData> callback) {
+        double lat = location.getLatitude();
+        double lon = location.getLongitude();
+        getWeather(lat, lon, callback);
+    }
+
+    public void getWeather(double lat, double lon, Callback<OpenWeatherData> callback) {
+        Call<OpenWeatherData> call = service
+                .getOpenWeatherResponse(lat, lon, "metric", OpenWeather_API_KEY);
+
+        call.enqueue(callback);
+    }
+
+    public void requestLocationPermissions() {
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED) {   // Not have location permission, request it
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                requestPermissions(
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                        REQUEST_PERMISSION_SETTINGS);
+            }
+
+        } else {    // Permission already, check location settings
+            requestLocationSettings();
+        }
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.M)
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull @NotNull String[] permissions,
+                                           @NonNull @NotNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        /**
+         * Handle request permission response. If permission granted, check location settings and
+         * request change (if needed). The first time user denied permision, request try again in
+         * {@link Snackbar}. If user denied it forever, request user go to settings to change this.
+         */
+        if (requestCode == REQUEST_PERMISSION_SETTINGS) {   // handle requestLocationPermissions()
+            if (grantResults.length == 1 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                requestLocationSettings();  // Permission granted, call requestLocationSettings()
+            } else if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+                Snackbar.make(pager, "Permission Denied.", Snackbar.LENGTH_INDEFINITE)
+                        .setAction("Try again", v -> {
+                            requestLocationPermissions();
+                        }).show();  // Alert "Permission denied.", click "Try again" to request
+            } else {
+                Snackbar.make(pager, "Permission Denied.", Snackbar.LENGTH_INDEFINITE)
+                        .setAction("Fix", v -> {
+                            Intent intent = new Intent();
+                            intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                            intent.setData(Uri.fromParts(
+                                    "package",
+                                    this.getPackageName(),
+                                    null
+                            ));
+                            startActivity(intent);
+                        }).show();  // Alert "Permission denied.", click "Fix" to go Settings
+            }
         }
     }
 
@@ -106,46 +245,19 @@ public class MainActivity extends FragmentActivity {
         locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
     }
 
-    /**
-     * Get weather data from OpenWeather via Retrofit
-     * @param lat   latitude
-     * @param lon   longitude
-     */
-    public void getWeather(double lat, double lon) {
-        Call<OpenWeatherRespond> call = service.getOpenWeatherRespond(lat, lon, "metric", OpenWeather_API_KEY);
-        call.enqueue(new Callback<OpenWeatherRespond>() {
-            @Override
-            public void onResponse(Call<OpenWeatherRespond> call, Response<OpenWeatherRespond> response) {
-                openWeatherRespond = response.body();
-                updateData(MAIN_WEATHER_REQUEST_KEY, makeMainWeatherBundle());
-                updateData(MORE_WEATHER_REQUEST_KEY, makeMoreWeatherBundle());
-            }
-
-            @Override
-            public void onFailure(Call<OpenWeatherRespond> call, Throwable t) {
-                Log.e("Retrofit", t.getMessage());
-            }
-        });
-    }
-
-    public void checkPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSION_SETTINGS);
-            } else {
-                checkLocationSettings();
-            }
-        }
-    }
-
-    public void checkLocationSettings() {
+    public void requestLocationSettings() {
         // Check and request Location Setting
         createLocationRequest();
+
         LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
                 .addLocationRequest(locationRequest);
         SettingsClient client = LocationServices.getSettingsClient(this);
         Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
+
+        task.addOnSuccessListener(this, locationSettingsResponse -> {
+            // Change settings successful, now get location from GPS_PROVIDER
+            updateLocation();
+        });
 
         task.addOnFailureListener(this, e -> {
             if (e instanceof ResolvableApiException) {
@@ -159,74 +271,45 @@ public class MainActivity extends FragmentActivity {
         });
     }
 
-    public Bundle makeMainWeatherBundle() {
-        if (openWeatherRespond == null) return null;
-
-        Bundle bundle = new Bundle();
-        bundle.putString("geoLocation", openWeatherRespond.getName());
-        bundle.putString("main", openWeatherRespond.getWeather()[0].getMain());
-        bundle.putDouble("temp", openWeatherRespond.getMain().getTemp());
-        bundle.putDouble("tempMin", openWeatherRespond.getMain().getTempMin());
-        bundle.putDouble("tempMax", openWeatherRespond.getMain().getTempMax());
-
-        return bundle;
-    }
-
-    public Bundle makeMoreWeatherBundle() {
-        if (openWeatherRespond == null) return null;
-
-        Bundle bundle = new Bundle();
-        bundle.putString("geoLocation", openWeatherRespond.getName() + " - " + openWeatherRespond.getSys().getCountry());
-        bundle.putString("description", openWeatherRespond.getWeather()[0].getDescription());
-        bundle.putDouble("temp", openWeatherRespond.getMain().getTemp());
-        bundle.putDouble("tempMin", openWeatherRespond.getMain().getTempMin());
-        bundle.putDouble("tempMax", openWeatherRespond.getMain().getTempMax());
-        bundle.putDouble("feels_like", openWeatherRespond.getMain().getFeelsLike());
-        bundle.putInt("humidity", openWeatherRespond.getMain().getHumidity());
-        bundle.putDouble("speed", openWeatherRespond.getWind().getSpeed());
-        bundle.putDouble("deg", openWeatherRespond.getWind().getDeg());
-        bundle.putLong("sunrise", openWeatherRespond.getSys().getSunrise() + openWeatherRespond.getTimezone());
-        bundle.putLong("sunset", openWeatherRespond.getSys().getSunset() + openWeatherRespond.getTimezone());
-
-        return bundle;
-    }
-
     public void updateLocation() {
-        checkPermission();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                if (locationManager == null) {
-                    locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-                }
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, MIN_TIME_INTERVAL,
-                        MIN_DISTANCE_UPDATE, locationListener);
-            }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return;
         }
 
+        Task<Location> task = locationProviderClient.getCurrentLocation(
+                LocationRequest.PRIORITY_HIGH_ACCURACY,
+                new CancellationToken() {
+                    @Override
+                    public boolean isCancellationRequested() {
+                        return false;
+                    }
+
+                    @NonNull
+                    @NotNull
+                    @Override
+                    public CancellationToken onCanceledRequested(@NonNull @NotNull OnTokenCanceledListener onTokenCanceledListener) {
+                        return null;
+                    }
+                });
+
+        task.addOnSuccessListener(this, location -> getWeather(location, updateCallback));
+        task.addOnFailureListener(this, e -> {
+            Log.e("Location", e.getMessage());
+            Bundle bundle = preferencesHelper.getPreferences();
+            getWeather(
+                    bundle.getDouble("coord.lat"),
+                    bundle.getDouble("coord.lon"),
+                    updateCallback
+            );
+        });
     }
 
     public void updateData(String requestKey, Bundle result) {
         getSupportFragmentManager().setFragmentResult(requestKey, result);
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull @NotNull String[] permissions,
-                                           @NonNull @NotNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        switch (requestCode) {
-            case REQUEST_PERMISSION_SETTINGS:
-                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    checkLocationSettings();
-                } else {
-                    ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
-                }
-                return;
-        }
-    }
-
-    private class ScreenSlidePagerAdapter extends FragmentStateAdapter {
+    // ViewPager2 adapter
+    private static class ScreenSlidePagerAdapter extends FragmentStateAdapter {
         public ScreenSlidePagerAdapter(@NonNull
                                        @org.jetbrains.annotations.NotNull
                                                FragmentActivity fragmentActivity) {
@@ -237,11 +320,14 @@ public class MainActivity extends FragmentActivity {
         @NotNull
         @Override
         public Fragment createFragment(int position) {
-            if (position == 0) {
+            if (position == 1) {
                 return new MainWeatherFragment();
-            } else {
+            } else if (position == 2){
                 return new MoreWeatherFragment();
+            } else if (position == 0) {
+                return new SavedLocationFragment();
             }
+            return new MainWeatherFragment();
         }
 
         @Override

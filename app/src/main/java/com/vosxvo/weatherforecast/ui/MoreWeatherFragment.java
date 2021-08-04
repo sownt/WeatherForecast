@@ -2,6 +2,7 @@ package com.vosxvo.weatherforecast.ui;
 
 import android.content.Context;
 import android.os.Bundle;
+import android.os.Handler;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -73,6 +74,12 @@ public class MoreWeatherFragment extends Fragment implements WeatherFragment, Sw
 
         moreWeatherLayout.setOnRefreshListener(this);
         startLoading();
+
+        getParentFragmentManager().setFragmentResultListener(MainActivity.MORE_WEATHER_UPDATE,
+                this, (requestKey, result) -> {
+                    bundle = result;
+                    updateUI(result);
+                });
     }
 
     @Override
@@ -82,41 +89,38 @@ public class MoreWeatherFragment extends Fragment implements WeatherFragment, Sw
     }
 
     @Override
-    public void onStart() {
-        super.onStart();
-        getParentFragmentManager().setFragmentResultListener(MainActivity.MORE_WEATHER_REQUEST_KEY,
-                this, (requestKey, result) -> {
-                    bundle = result;
-                    updateUI(result);
-        });
-    }
-
-    @Override
     public void onRefresh() {
-        ((MainActivity) getActivity()).updateLocation();
+        getParentFragmentManager().setFragmentResult(MainActivity.UPDATE_UI_REQUEST_KEY, new Bundle());
     }
 
     @Override
     public void updateUI(Bundle bundle) {
-        geoLocation.setText(bundle.getString("geoLocation"));
-        currentWeather.setText(bundle.getString("description"));
-        temperature.setText(String.format("%.0f°C", bundle.getDouble("temp")));
-        temperatureMinMax.setText(String.format("%.0f°C / %.0f°C", bundle.getDouble("tempMin"),
-                bundle.getDouble("tempMax")));
-        temperatureFeelsLike.setText(String.format("%.0f°C", bundle.getDouble("feels_like")));
-        humidity.setText(String.format("%d%%", bundle.getInt("humidity")));
-        speed.setText(String.format("%.1f m/s", bundle.getDouble("speed")));
-        deg.setText(String.format("%.1f", bundle.getDouble("deg")));
+        geoLocation.setText(bundle.getString("name"));
+        currentWeather.setText(bundle.getString("weather.description"));
+        temperature.setText(String.format("%.0f°C", bundle.getDouble("main.temp")));
+        temperatureMinMax.setText(String.format("%.0f°C / %.0f°C", bundle.getDouble("main.temp_min"),
+                bundle.getDouble("main.temp_max")));
+        temperatureFeelsLike.setText(String.format("%.0f°C", bundle.getDouble("main.feels_like")));
+        humidity.setText(String.format("%d%%", bundle.getInt("main.humidity")));
+        speed.setText(String.format("%.1f m/s", bundle.getDouble("wind.speed")));
+        deg.setText(String.format("%s", degToCompass(bundle.getDouble("deg"))));
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("K:mm a");
         dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
-        Date rise = new Date((long) bundle.getLong("sunrise") * 1000);
+        Date rise = new Date((long) bundle.getLong("sys.sunrise") * 1000);
         sunrise.setText(dateFormat.format(rise));
-        Date set = new Date((long) bundle.getLong("sunset") * 1000);
+        Date set = new Date((long) bundle.getLong("sys.sunset") * 1000);
         sunset.setText(dateFormat.format(set));
 
         moreWeatherLayout.setRefreshing(false);
         stopLoading();
+    }
+
+    public String degToCompass(double deg) {
+        String[] dir = {"North","North - Northeast","Northeast","East - Northeast","East",
+                "East - Southeast", "Southeast", "South - Southeast","South","South - Southwest",
+                "Southwest","West - Southwest","West","West - Northwest","Northwest","North - Northwest"};
+        return dir[(int) ((deg / 22.5) + 0.5) % 16];
     }
 
     public void startLoading() {
@@ -135,7 +139,7 @@ public class MoreWeatherFragment extends Fragment implements WeatherFragment, Sw
 
     public void startFade() {
         AlphaAnimation animation = new AlphaAnimation(0.0f, 1.0f);
-        animation.setDuration(1000);
+        animation.setDuration(500);
         animation.setRepeatCount(0);
         animation.setRepeatMode(Animation.REVERSE);
         mainLayout.startAnimation(animation);
