@@ -26,6 +26,7 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField "String", "OpenWeatherApiKey", OpenWeather_API_KEY
+            buildConfigField "String", "GOOGLE_PLACE_API_KEY", GOOGLE_PLACE_API_KEY
         }
     }
     compileOptions {
