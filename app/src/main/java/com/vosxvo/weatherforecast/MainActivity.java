@@ -159,6 +159,10 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
+    public void backToMainScreen() {
+        pager.setCurrentItem(1);
+    }
+
     public void updateWeather() {
         if (preferencesHelper.usesLocation()) {
             // if "uses_location" is true or it doesn't init, get coordinate from Fused Location Provider

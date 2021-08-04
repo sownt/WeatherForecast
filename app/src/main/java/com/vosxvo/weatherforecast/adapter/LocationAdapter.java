@@ -74,7 +74,7 @@ public class LocationAdapter extends RecyclerView.Adapter<LocationAdapter.Locati
         holder.locationItem.setOnClickListener(v -> {
             onItemClicked(position);
             ((MainActivity) context).updateWeather();
-            Toast.makeText(context, "Updated!", Toast.LENGTH_SHORT).show();
+//            Toast.makeText(context, "Updated!", Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -90,6 +90,7 @@ public class LocationAdapter extends RecyclerView.Adapter<LocationAdapter.Locati
             bundle.putBoolean("uses_location", true);
         }
         preferencesHelper.savePreferences(bundle);
+        ((MainActivity) context).backToMainScreen();
     }
 
     public void close() {
