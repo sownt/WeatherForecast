@@ -20,6 +20,7 @@ android {
     buildTypes {
         debug {
             buildConfigField "String", "OpenWeatherApiKey", OpenWeather_API_KEY
+            buildConfigField "String", "GOOGLE_PLACE_API_KEY", GOOGLE_PLACE_API_KEY
         }
         release {
             minifyEnabled false
@@ -57,5 +58,11 @@ dependencies {
     testImplementation 'com.google.dagger:hilt-android-testing:2.37'
     testAnnotationProcessor 'com.google.dagger:hilt-compiler:2.37'
     implementation 'com.google.android.gms:play-services-location:18.0.0'
+    implementation 'com.google.android.libraries.places:places:2.4.0'
+
+    def room_version = "2.3.0"
+    implementation "androidx.room:room-runtime:$room_version"
+    annotationProcessor "androidx.room:room-compiler:$room_version"
+
 
 }
