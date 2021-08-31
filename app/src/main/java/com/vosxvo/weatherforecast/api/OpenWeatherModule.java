@@ -9,7 +9,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 @Module
 @InstallIn(ActivityComponent.class)
-public class OpenWeatherClient {
+public class OpenWeatherModule {
 
     @Provides
     public OpenWeatherService getService(Retrofit retrofit) {
